@@ -1,0 +1,2 @@
+# Python dependencies for callshow tracer
+# The core tracer uses only stdlib (sys.settrace), no external deps needed.

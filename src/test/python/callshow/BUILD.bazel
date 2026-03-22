@@ -1,0 +1,9 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_tracer",
+    srcs = ["test_tracer.py"],
+    deps = [
+        "//src/main/python/callshow:callshow_lib",
+    ],
+)

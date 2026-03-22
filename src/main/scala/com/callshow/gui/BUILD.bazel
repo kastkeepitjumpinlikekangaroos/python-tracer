@@ -1,0 +1,22 @@
+load("@rules_scala//scala:scala.bzl", "scala_binary")
+
+scala_binary(
+    name = "gui",
+    main_class = "com.callshow.gui.Main",
+    srcs = glob(["**/*.scala"]),
+    resources = glob(["**/*.css"]),
+    resource_strip_prefix = "src/main/scala",
+    data = [
+        "//src/main/python/callshow:callshow",
+    ],
+    deps = [
+        "@maven//:org_openjfx_javafx_base",
+        "@maven//:org_openjfx_javafx_controls",
+        "@maven//:org_openjfx_javafx_fxml",
+        "@maven//:org_openjfx_javafx_graphics",
+        "@maven//:org_openjfx_javafx_base_mac_aarch64",
+        "@maven//:org_openjfx_javafx_controls_mac_aarch64",
+        "@maven//:org_openjfx_javafx_graphics_mac_aarch64",
+        "@maven//:com_google_code_gson_gson",
+    ],
+)
