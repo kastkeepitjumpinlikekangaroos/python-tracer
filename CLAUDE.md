@@ -31,6 +31,14 @@ The GUI locates the Python binary via `TracerLocator` (checks `RUNFILES_DIR`, `J
 - `return None` values are omitted entirely.
 - Max repr length is 120 chars, truncated with `...`.
 
+### Attach mode (`attach.py`)
+
+- Uses `lldb` (macOS) or `gdb` (Linux) to call `PyGILState_Ensure()`, `PyRun_SimpleString(payload)`, `PyGILState_Release()` then detach.
+- The payload script (`ATTACH_PAYLOAD`) is a standalone Python script using `__PLACEHOLDER__` string substitution (not `.format()`, to avoid brace issues).
+- Variables are prefixed with `_cs_` (not `_trace_`) to avoid colliding with the sitecustomize-based tracer.
+- On `Ctrl+C`, a detach payload is injected that calls `sys.settrace(None)`.
+- Requires `sudo` on macOS due to SIP restricting `task_for_pid`.
+
 ### Scala GUI
 
 - All UI updates go through `Platform.runLater()`. Events from the JSONL tailer thread are dispatched to the JavaFX thread.

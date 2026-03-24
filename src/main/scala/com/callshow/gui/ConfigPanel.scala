@@ -10,7 +10,7 @@ import scala.jdk.CollectionConverters._
 
 /**
  * Left-side configuration panel with directory picker, command editor,
- * and execute/stop buttons.
+ * attach-by-PID, and execute/stop buttons.
  */
 class ConfigPanel(stage: Stage) extends VBox(10) {
 
@@ -19,7 +19,18 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
   setPrefWidth(350)
   setMinWidth(300)
 
-  // --- Directory selector ---
+  // --- Mode toggle: Launch / Attach ---
+  private val launchRadio = new RadioButton("Launch command")
+  private val attachRadio = new RadioButton("Attach to PID")
+  private val modeGroup = new ToggleGroup()
+  launchRadio.setToggleGroup(modeGroup)
+  attachRadio.setToggleGroup(modeGroup)
+  launchRadio.setSelected(true)
+
+  private val modeBox = new HBox(15, launchRadio, attachRadio)
+  modeBox.setAlignment(Pos.CENTER_LEFT)
+
+  // --- Launch mode: Directory + Command ---
   private val dirLabel = new Label("Project Directory")
   dirLabel.getStyleClass.add("section-header")
 
@@ -28,7 +39,6 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
   directoryCombo.setMaxWidth(Double.MaxValue)
   directoryCombo.setPromptText("Select a directory...")
 
-  // Load recent directories
   private val recentDirs = AppPreferences.getRecentDirectories
   directoryCombo.getItems.addAll(recentDirs.asJava)
   val lastDir = AppPreferences.getLastDirectory
@@ -50,7 +60,6 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
 
   private val dirBox = new VBox(5, dirLabel, directoryCombo, browseButton)
 
-  // --- Command editor ---
   private val cmdLabel = new Label("Command Entry Point")
   cmdLabel.getStyleClass.add("section-header")
 
@@ -59,11 +68,42 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
   commandEditor.setPrefRowCount(4)
   commandEditor.setFont(javafx.scene.text.Font.font("Menlo", 13))
 
-  // Load last command
   val lastCmd = AppPreferences.getLastCommand
   if (lastCmd.nonEmpty) commandEditor.setText(lastCmd)
 
   private val cmdBox = new VBox(5, cmdLabel, commandEditor)
+
+  private val launchPane = new VBox(10, dirBox, cmdBox)
+
+  // --- Attach mode: PID field ---
+  private val pidLabel = new Label("Process ID (PID)")
+  pidLabel.getStyleClass.add("section-header")
+
+  private val pidField = new TextField()
+  pidField.setPromptText("e.g. 12345")
+  pidField.setFont(javafx.scene.text.Font.font("Menlo", 14))
+
+  private val pidHint = new Label("Find with: ps aux | grep python")
+  pidHint.getStyleClass.add("shortcut-hint")
+
+  private val attachPane = new VBox(5, pidLabel, pidField, pidHint)
+  attachPane.setVisible(false)
+  attachPane.setManaged(false)
+
+  // --- Mode switching ---
+  modeGroup.selectedToggleProperty().addListener((_, _, newVal) => {
+    val isAttach = newVal == attachRadio
+    launchPane.setVisible(!isAttach)
+    launchPane.setManaged(!isAttach)
+    attachPane.setVisible(isAttach)
+    attachPane.setManaged(isAttach)
+  })
+
+  // --- Capture locals checkbox ---
+  private val captureLocalsCheck = new CheckBox("Capture locals()")
+  captureLocalsCheck.setTooltip(new Tooltip(
+    "Capture local variables at each call/return. Adds overhead but enables debugging."
+  ))
 
   // --- Execute / Stop buttons ---
   private val executeButton = new Button("\u25b6  Execute")
@@ -79,20 +119,17 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
   HBox.setHgrow(executeButton, Priority.ALWAYS)
   HBox.setHgrow(stopButton, Priority.ALWAYS)
 
-  // --- Capture locals checkbox ---
-  private val captureLocalsCheck = new CheckBox("Capture locals()")
-  captureLocalsCheck.setTooltip(new Tooltip(
-    "Capture local variables at each call/return. Adds overhead but enables debugging."
-  ))
-
   // --- Separator ---
   private val sep = new Separator()
 
-  getChildren.addAll(dirBox, cmdBox, captureLocalsCheck, buttonBox, sep)
+  getChildren.addAll(modeBox, launchPane, attachPane, captureLocalsCheck, buttonBox, sep)
 
   // --- Public API ---
+  def isAttachMode: Boolean = attachRadio.isSelected
+
   def getDirectory: String = directoryCombo.getEditor.getText
   def getCommand: String = commandEditor.getText
+  def getAttachPid: String = pidField.getText.trim
 
   def getCaptureLocals: Boolean = captureLocalsCheck.isSelected
 
@@ -111,10 +148,18 @@ class ConfigPanel(stage: Stage) extends VBox(10) {
     directoryCombo.setDisable(running)
     browseButton.setDisable(running)
     commandEditor.setDisable(running)
+    pidField.setDisable(running)
+    launchRadio.setDisable(running)
+    attachRadio.setDisable(running)
   }
 
   def focusDirectory(): Unit = {
-    directoryCombo.requestFocus()
-    directoryCombo.getEditor.selectAll()
+    if (isAttachMode) {
+      pidField.requestFocus()
+      pidField.selectAll()
+    } else {
+      directoryCombo.requestFocus()
+      directoryCombo.getEditor.selectAll()
+    }
   }
 }

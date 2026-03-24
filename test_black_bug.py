@@ -1,7 +1,5 @@
 match test:
     case (
         case
-    ) if (
-        True
-    ):
+    ) if True:
         pass

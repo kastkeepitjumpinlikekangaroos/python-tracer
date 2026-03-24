@@ -280,25 +280,58 @@ def run_traced(
     reader = StreamingTraceReader(events_file, collect_event)
     reader.start()
 
-    # Set up stdout/stderr capture
+    # Set up stdout/stderr capture.
+    # IMPORTANT: we must drain stdout/stderr concurrently to avoid deadlock.
+    # If the traced program produces output while the pipe buffer is full,
+    # the child blocks on write() and we block on waitpid() — deadlock.
     stdout_fh = None
     stderr_fh = None
+    stdout_lines = []
+    stderr_lines = []
     try:
         if stdout_file:
             stdout_fh = open(stdout_file, "w")
         if stderr_file:
             stderr_fh = open(stderr_file, "w")
 
-        # Execute the command
         start_time = time.monotonic()
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             ["bash", script_path],
             cwd=directory,
             env=env,
             stdout=stdout_fh if stdout_fh else subprocess.PIPE,
             stderr=stderr_fh if stderr_fh else subprocess.PIPE,
         )
+
+        # Drain stdout/stderr in background threads to prevent pipe deadlock
+        def drain_pipe(pipe, sink):
+            if pipe is None:
+                return
+            try:
+                for line in pipe:
+                    sink.append(line)
+            except Exception:
+                pass
+
+        if proc.stdout:
+            t_out = threading.Thread(
+                target=drain_pipe, args=(proc.stdout, stdout_lines), daemon=True)
+            t_out.start()
+        if proc.stderr:
+            t_err = threading.Thread(
+                target=drain_pipe, args=(proc.stderr, stderr_lines), daemon=True)
+            t_err.start()
+
+        proc.wait()
         duration = time.monotonic() - start_time
+
+        # Wait for drain threads to finish
+        if proc.stdout:
+            t_out.join(timeout=2)
+            proc.stdout.close()
+        if proc.stderr:
+            t_err.join(timeout=2)
+            proc.stderr.close()
     finally:
         if stdout_fh:
             stdout_fh.close()

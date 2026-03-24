@@ -11,10 +11,17 @@ bazel build //...
 # Launch the GUI
 bazel run //src/main/scala/com/callshow/gui:gui
 
-# Or use the CLI directly
+# Trace a program via CLI
 bazel run //src/main/python/callshow:callshow -- \
   --directory /path/to/project \
   --command "python3 main.py" \
+  --output trace.json \
+  --capture-locals \
+  --stream
+
+# Attach to a running Python process (requires sudo on macOS)
+sudo PYTHONPATH=src/main/python python3 -m callshow.cli \
+  --attach <PID> \
   --output trace.json \
   --capture-locals \
   --stream
@@ -70,13 +77,14 @@ A dark-themed desktop application with:
 ## CLI Reference
 
 ```
-callshow --directory DIR --command CMD [options]
+python3 -m callshow.cli (--command CMD | --attach PID) [options]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--directory, -d` | Working directory for the target program (required) |
-| `--command, -c` | Bash command to execute, can be multi-line (required) |
+| `--command, -c` | Bash command to execute, can be multi-line |
+| `--attach, -a` | Attach to a running Python process by PID |
+| `--directory, -d` | Working directory for the target program (default: `.`) |
 | `--output, -o` | Output JSON file path (default: `callshow_trace.json`) |
 | `--events-file` | Path for streaming JSONL events (default: auto temp file) |
 | `--capture-locals` | Capture local variables at each call/return |
@@ -85,6 +93,28 @@ callshow --directory DIR --command CMD [options]
 | `--stream` | Print events to stdout as they stream in |
 | `--stdout-file` | Path to capture subprocess stdout |
 | `--stderr-file` | Path to capture subprocess stderr |
+
+### Attach Mode
+
+Attach to an already-running Python process and inject tracing:
+
+```bash
+# Find your Python process
+ps aux | grep python
+
+# Attach (requires sudo on macOS due to SIP)
+# From the python-callshow project root:
+sudo PYTHONPATH=src/main/python python3 -m callshow.cli \
+  --attach 12345 --capture-locals --stream --output trace.json
+# Press Ctrl+C to stop tracing and detach
+```
+
+Requirements:
+- **macOS**: `sudo` required (SIP restricts `task_for_pid`). Uses `lldb` to inject.
+- **Linux**: Same-user or `CAP_SYS_PTRACE` capability. Uses `gdb` to inject.
+- Target must be a **CPython** process (not PyPy, GraalPy, etc.)
+
+The tracer injects `sys.settrace` into the running process via the debugger calling `PyRun_SimpleString()`. On `Ctrl+C`, a second injection removes the trace hook and detaches cleanly.
 
 ## JSON Output Format
 

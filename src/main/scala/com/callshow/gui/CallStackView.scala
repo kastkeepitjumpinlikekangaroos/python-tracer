@@ -13,8 +13,7 @@ import scala.jdk.CollectionConverters._
 
 /**
  * Main display area showing traced call events.
- * Features: indented call hierarchy, color-coded rows, search,
- * locals detail panel, and double-click to open in editor.
+ * Optimized for large traces (50k+ events).
  */
 class CallStackView extends VBox {
 
@@ -102,13 +101,8 @@ class CallStackView extends VBox {
   varNameCol.setCellFactory(_ => new TableCell[java.util.Map.Entry[String, String], String] {
     override def updateItem(item: String, empty: Boolean): Unit = {
       super.updateItem(item, empty)
-      if (empty || item == null) {
-        setText(null)
-        setStyle("")
-      } else {
-        setText(item)
-        setStyle("-fx-text-fill: #f9e2af; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
-      }
+      if (empty || item == null) { setText(null); setStyle("") }
+      else { setText(item); setStyle("-fx-text-fill: #f9e2af; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;") }
     }
   })
 
@@ -121,16 +115,11 @@ class CallStackView extends VBox {
   varValueCol.setCellFactory(_ => new TableCell[java.util.Map.Entry[String, String], String] {
     override def updateItem(item: String, empty: Boolean): Unit = {
       super.updateItem(item, empty)
-      if (empty || item == null) {
-        setText(null)
-        setTooltip(null)
-        setStyle("")
-      } else {
+      if (empty || item == null) { setText(null); setTooltip(null); setStyle("") }
+      else {
         setText(item)
         setStyle("-fx-text-fill: #a6e3a1; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
-        if (item.length > 50) {
-          setTooltip(new Tooltip(item))
-        }
+        setTooltip(if (item.length > 50) new Tooltip(item) else null)
       }
     }
   })
@@ -141,9 +130,8 @@ class CallStackView extends VBox {
   localsPane.setPadding(new Insets(4, 0, 0, 0))
   localsPane.getStyleClass.add("locals-panel")
 
-  // Update locals when selection changes
   eventsTable.getSelectionModel.selectedItemProperty().addListener((_, _, newVal) => {
-    updateLocalsPanel(newVal)
+    updateLocalsPanel(newVal, localsHeader, localsTable)
   })
 
   // --- Table toolbar: auto-scroll + search ---
@@ -154,16 +142,24 @@ class CallStackView extends VBox {
   searchField.getStyleClass.add("search-field")
   searchField.setPromptText("\ud83d\udd0d Search functions...")
   searchField.setPrefWidth(200)
+
+  // Debounced search: only apply predicate after 200ms of no typing
+  private var searchTimer: javafx.animation.PauseTransition = _
   searchField.textProperty().addListener((_, _, newVal) => {
-    val query = if (newVal == null) "" else newVal.trim.toLowerCase
-    if (query.isEmpty) {
-      filteredItems.setPredicate(_ => true)
-    } else {
-      filteredItems.setPredicate(event =>
-        (event.function_name != null && event.function_name.toLowerCase.contains(query)) ||
-        (event.file_path != null && event.file_path.toLowerCase.contains(query))
-      )
-    }
+    if (searchTimer != null) searchTimer.stop()
+    searchTimer = new javafx.animation.PauseTransition(javafx.util.Duration.millis(200))
+    searchTimer.setOnFinished(_ => {
+      val query = if (newVal == null) "" else newVal.trim.toLowerCase
+      if (query.isEmpty) {
+        filteredItems.setPredicate(_ => true)
+      } else {
+        filteredItems.setPredicate(event =>
+          (event.function_name != null && event.function_name.toLowerCase.contains(query)) ||
+          (event.file_path != null && event.file_path.toLowerCase.contains(query))
+        )
+      }
+    })
+    searchTimer.play()
   })
 
   private val searchSpacer = new Region()
@@ -199,7 +195,6 @@ class CallStackView extends VBox {
   callTree.setShowRoot(false)
   callTree.setCellFactory(_ => new SummaryTreeCell())
 
-  // Double-click and Enter on tree nodes
   callTree.setOnMouseClicked { event =>
     if (event.getClickCount == 2 && event.getButton == MouseButton.PRIMARY) {
       openTreeSelectionInEditor()
@@ -212,7 +207,67 @@ class CallStackView extends VBox {
     }
   }
 
-  private val summaryTab = new Tab("Summary", callTree)
+  // Locals detail panel for tree selection (shared format with table's panel)
+  private val treeLocalsHeader = new Label("Locals")
+  treeLocalsHeader.getStyleClass.add("section-header")
+  treeLocalsHeader.setStyle("-fx-text-fill: #a6adc8; -fx-font-size: 12px; -fx-font-weight: bold;")
+
+  private val treeLocalsTable = new TableView[java.util.Map.Entry[String, String]]()
+  treeLocalsTable.setPlaceholder(new Label("Select a function to view locals"))
+  treeLocalsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN)
+
+  private val treeVarNameCol = new TableColumn[java.util.Map.Entry[String, String], String]("Variable")
+  treeVarNameCol.setPrefWidth(160)
+  treeVarNameCol.setMinWidth(100)
+  treeVarNameCol.setSortable(true)
+  treeVarNameCol.setCellValueFactory(cell => new SimpleStringProperty(cell.getValue.getKey))
+  treeVarNameCol.setCellFactory(_ => new TableCell[java.util.Map.Entry[String, String], String] {
+    override def updateItem(item: String, empty: Boolean): Unit = {
+      super.updateItem(item, empty)
+      if (empty || item == null) { setText(null); setStyle("") }
+      else { setText(item); setStyle("-fx-text-fill: #f9e2af; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;") }
+    }
+  })
+
+  private val treeVarValueCol = new TableColumn[java.util.Map.Entry[String, String], String]("Value")
+  treeVarValueCol.setPrefWidth(400)
+  treeVarValueCol.setMinWidth(200)
+  treeVarValueCol.setSortable(false)
+  treeVarValueCol.setCellValueFactory(cell => new SimpleStringProperty(cell.getValue.getValue))
+  treeVarValueCol.setCellFactory(_ => new TableCell[java.util.Map.Entry[String, String], String] {
+    override def updateItem(item: String, empty: Boolean): Unit = {
+      super.updateItem(item, empty)
+      if (empty || item == null) { setText(null); setTooltip(null); setStyle("") }
+      else {
+        setText(item)
+        setStyle("-fx-text-fill: #a6e3a1; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
+        setTooltip(if (item.length > 50) new Tooltip(item) else null)
+      }
+    }
+  })
+
+  treeLocalsTable.getColumns.addAll(treeVarNameCol, treeVarValueCol)
+
+  private val treeLocalsPane = new VBox(4, treeLocalsHeader, treeLocalsTable)
+  treeLocalsPane.setPadding(new Insets(4, 0, 0, 0))
+  treeLocalsPane.getStyleClass.add("locals-panel")
+
+  // Wire tree selection to locals panel
+  callTree.getSelectionModel.selectedItemProperty().addListener((_, _, newVal) => {
+    if (newVal != null && newVal.getValue != null) {
+      updateLocalsPanel(newVal.getValue, treeLocalsHeader, treeLocalsTable)
+    } else {
+      treeLocalsHeader.setText("Locals")
+      treeLocalsTable.getItems.clear()
+    }
+  })
+
+  private val treeSplit = new SplitPane()
+  treeSplit.setOrientation(Orientation.VERTICAL)
+  treeSplit.getItems.addAll(callTree, treeLocalsPane)
+  treeSplit.setDividerPositions(0.7)
+
+  private val summaryTab = new Tab("Summary", treeSplit)
   summaryTab.setClosable(false)
 
   tabPane.getTabs.addAll(streamTab, outputTab, summaryTab)
@@ -224,36 +279,89 @@ class CallStackView extends VBox {
 
   autoScrollCheck.setOnAction(_ => autoScroll = autoScrollCheck.isSelected)
 
-  // ---- Locals panel updates ----
-  private def updateLocalsPanel(event: CallEvent): Unit = {
+  // ---- Event batching for high-throughput streaming ----
+  // Instead of updating the UI per-event, batch events and flush periodically.
+  private val pendingEvents = new java.util.ArrayList[CallEvent](256)
+  private var batchTimer: javafx.animation.AnimationTimer = _
+  private var pendingScrollTo = false
+
+  private def startBatchTimer(): Unit = {
+    if (batchTimer != null) return
+    batchTimer = new javafx.animation.AnimationTimer() {
+      private var lastFlush = 0L
+      override def handle(now: Long): Unit = {
+        // Flush at most every 50ms (20fps)
+        if (now - lastFlush >= 50_000_000L) {
+          flushPendingEvents()
+          lastFlush = now
+        }
+      }
+    }
+    batchTimer.start()
+  }
+
+  private def stopBatchTimer(): Unit = {
+    if (batchTimer != null) {
+      batchTimer.stop()
+      batchTimer = null
+    }
+    flushPendingEvents()
+  }
+
+  private def flushPendingEvents(): Unit = {
+    if (pendingEvents.isEmpty) return
+    // Add all pending events to the observable list in one batch
+    allItems.addAll(pendingEvents)
+    pendingEvents.clear()
+    if (pendingScrollTo && autoScroll && !filteredItems.isEmpty) {
+      eventsTable.scrollTo(filteredItems.size - 1)
+      pendingScrollTo = false
+    }
+  }
+
+  // ---- Locals panel updates (shared by table and tree selection) ----
+  private def updateLocalsPanel(
+    event: CallEvent,
+    header: Label,
+    table: TableView[java.util.Map.Entry[String, String]]
+  ): Unit = {
     val items = FXCollections.observableArrayList[java.util.Map.Entry[String, String]]()
 
     if (event != null && event.hasReturnValue) {
-      // Add return value as first entry
       items.add(java.util.Map.entry("\u21b5 return", event.return_value))
     }
 
     if (event != null && event.hasLocals) {
       items.addAll(event.locals_data.entrySet())
       val retSuffix = if (event.hasReturnValue) s" \u2192 ${truncate(event.return_value, 40)}" else ""
-      localsHeader.setText(s"Locals \u2014 ${event.function_name}()$retSuffix")
+      header.setText(s"Locals \u2014 ${event.function_name}()$retSuffix")
     } else if (event != null && event.hasReturnValue) {
-      localsHeader.setText(s"Locals \u2014 ${event.function_name}() \u2192 ${truncate(event.return_value, 60)}")
+      header.setText(s"Locals \u2014 ${event.function_name}() \u2192 ${truncate(event.return_value, 60)}")
     } else if (event != null) {
-      localsHeader.setText("Locals \u2014 not captured (enable 'Capture locals()' and re-run)")
+      header.setText("Locals \u2014 not captured (enable 'Capture locals()' and re-run)")
     } else {
-      localsHeader.setText("Locals")
+      header.setText("Locals")
     }
-    localsTable.setItems(items)
+    table.setItems(items)
   }
 
   private def truncate(s: String, max: Int): String =
     if (s != null && s.length > max) s.take(max) + "..." else if (s != null) s else ""
 
-  // ---- Custom cells ----
+  // ---- Custom cells (reuse nodes to avoid GC pressure) ----
 
-  /** Cell that renders indented call/return with arrow glyphs. */
+  /** Cell that renders indented call/return with arrow glyphs. Reuses child nodes. */
   private class CallStackCell extends TableCell[CallEvent, String] {
+    private val spacer = new Region()
+    private val arrowLabel = new Label()
+    private val nameLabel = new Label()
+    private val retLabel = new Label()
+    private val localsHint = new Label(" {}")
+    localsHint.setStyle("-fx-text-fill: #f9e2af; -fx-font-size: 10px;")
+    retLabel.setStyle("-fx-text-fill: #cba6f7; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
+    private val box = new HBox()
+    box.setAlignment(Pos.CENTER_LEFT)
+
     override def updateItem(item: String, empty: Boolean): Unit = {
       super.updateItem(item, empty)
       if (empty || getTableRow == null || getTableRow.getItem == null) {
@@ -263,69 +371,77 @@ class CallStackView extends VBox {
         val event = getTableRow.getItem
         val indent = event.depth
         val isCall = event.event_type == "call"
-        val arrow = if (isCall) "\u25b6 " else "\u25c0 "
-        val name = if (event.function_name != null) event.function_name else ""
-        val isModule = name == "<module>"
 
-        val spacer = new Region()
         spacer.setMinWidth(indent * 14)
         spacer.setPrefWidth(indent * 14)
         spacer.setMaxWidth(indent * 14)
 
-        val arrowLabel = new Label(arrow)
+        arrowLabel.setText(if (isCall) "\u25b6 " else "\u25c0 ")
+        arrowLabel.getStyleClass.removeAll("call-arrow", "return-arrow")
         arrowLabel.getStyleClass.add(if (isCall) "call-arrow" else "return-arrow")
 
-        val nameLabel = new Label(name)
-        nameLabel.getStyleClass.add(if (isModule) "function-name-module" else "function-name")
+        val name = if (event.function_name != null) event.function_name else ""
+        nameLabel.setText(name)
+        nameLabel.getStyleClass.removeAll("function-name", "function-name-module")
+        nameLabel.getStyleClass.add(if (name == "<module>") "function-name-module" else "function-name")
 
-        val box = new HBox(spacer, arrowLabel, nameLabel)
+        box.getChildren.clear()
+        box.getChildren.addAll(spacer, arrowLabel, nameLabel)
 
-        // Show return value inline for return events
         if (!isCall && event.hasReturnValue) {
-          val retLabel = new Label(" \u2192 " + event.return_value)
-          retLabel.setStyle("-fx-text-fill: #cba6f7; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
-          if (event.return_value.length > 60) {
-            retLabel.setText(" \u2192 " + event.return_value.take(60) + "...")
-            retLabel.setTooltip(new Tooltip(event.return_value))
-          }
+          val rv = event.return_value
+          retLabel.setText(if (rv.length > 60) " \u2192 " + rv.take(60) + "..." else " \u2192 " + rv)
+          retLabel.setTooltip(if (rv.length > 60) new Tooltip(rv) else null)
           box.getChildren.add(retLabel)
         }
 
-        // Small indicator if locals are captured
         if (event.hasLocals) {
-          val localsHint = new Label(" {}")
-          localsHint.setStyle("-fx-text-fill: #f9e2af; -fx-font-size: 10px;")
           box.getChildren.add(localsHint)
         }
 
-        box.setAlignment(Pos.CENTER_LEFT)
         setGraphic(box)
         setText(null)
       }
     }
   }
 
-  /** Cell that shows location with tooltip. Clickable appearance. */
+  /** Cell that shows location with tooltip. Reuses nodes. */
   private class LocationCell extends TableCell[CallEvent, String] {
+    getStyleClass.add("location-cell")
+
     override def updateItem(item: String, empty: Boolean): Unit = {
       super.updateItem(item, empty)
       if (empty || item == null || getTableRow == null || getTableRow.getItem == null) {
         setText(null)
         setTooltip(null)
-        getStyleClass.remove("location-cell")
       } else {
         val event = getTableRow.getItem
         setText(event.shortLocation)
         setTooltip(new Tooltip(s"${event.relativeLocation(baseDirectory)}\nDouble-click or Enter to open in editor"))
-        if (!getStyleClass.contains("location-cell")) {
-          getStyleClass.add("location-cell")
-        }
       }
     }
   }
 
-  /** Tree cell that renders function name + location + locals as children. */
+  /** Tree cell for summary view. Reuses child nodes. */
   private class SummaryTreeCell extends TreeCell[CallEvent] {
+    private val icon = new Label()
+    private val nameLabel = new Label()
+    private val locLabel = new Label()
+    private val retLabel = new Label()
+    private val localsHint = new Label()
+    private val box = new HBox(2)
+    box.setAlignment(Pos.CENTER_LEFT)
+
+    // For local variable nodes
+    private val varNameLabel = new Label()
+    private val eqLabel = new Label(" = ")
+    eqLabel.setStyle("-fx-text-fill: #6c7086; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
+    private val varValLabel = new Label()
+    private val varBox = new HBox(varNameLabel, eqLabel, varValLabel)
+    varBox.setAlignment(Pos.CENTER_LEFT)
+    varNameLabel.setStyle("-fx-text-fill: #f9e2af; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
+    varValLabel.setStyle("-fx-text-fill: #a6e3a1; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
+
     override def updateItem(item: CallEvent, empty: Boolean): Unit = {
       super.updateItem(item, empty)
       if (empty || item == null) {
@@ -334,72 +450,51 @@ class CallStackView extends VBox {
         setTooltip(null)
       } else {
         val name = if (item.function_name != null) item.function_name else "?"
-        val isModule = name == "<module>"
-        val isLocalVar = name.startsWith("\u200b")  // zero-width space marks locals nodes
-        val treeItem = getTreeItem
-        val childCount = if (treeItem != null) treeItem.getChildren.size else 0
+        val isLocalVar = name.startsWith("\u200b")
 
         if (isLocalVar) {
-          // This is a locals variable child node
-          val varName = name.substring(1)  // strip marker
+          val varName = name.substring(1)
           val varValue = if (item.file_path != null) item.file_path else ""
-
-          val nameLabel = new Label(varName)
-          nameLabel.setStyle("-fx-text-fill: #f9e2af; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
-          val eqLabel = new Label(" = ")
-          eqLabel.setStyle("-fx-text-fill: #6c7086; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
-          val valLabel = new Label(varValue)
-          valLabel.setStyle("-fx-text-fill: #a6e3a1; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;")
-          if (varValue.length > 80) {
-            setTooltip(new Tooltip(varValue))
-          }
-
-          val box = new HBox(nameLabel, eqLabel, valLabel)
-          box.setAlignment(Pos.CENTER_LEFT)
-          setGraphic(box)
+          varNameLabel.setText(varName)
+          varValLabel.setText(varValue)
+          setTooltip(if (varValue.length > 80) new Tooltip(varValue) else null)
+          setGraphic(varBox)
         } else {
-          // Normal function call node
-          val icon = new Label(if (childCount > 0) "\u25bc " else "\u25c6 ")
-          icon.setStyle(
-            if (isModule) "-fx-text-fill: #89b4fa; -fx-font-size: 10px;"
-            else "-fx-text-fill: #a6e3a1; -fx-font-size: 10px;"
-          )
+          val isModule = name == "<module>"
+          val treeItem = getTreeItem
+          val childCount = if (treeItem != null) treeItem.getChildren.size else 0
 
-          val nameLabel = new Label(name)
+          icon.setText(if (childCount > 0) "\u25bc " else "\u25c6 ")
+          icon.setStyle(if (isModule) "-fx-text-fill: #89b4fa; -fx-font-size: 10px;" else "-fx-text-fill: #a6e3a1; -fx-font-size: 10px;")
+
+          nameLabel.setText(name)
           nameLabel.setStyle(
             if (isModule) "-fx-text-fill: #6c7086; -fx-font-style: italic; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;"
             else "-fx-text-fill: #cdd6f4; -fx-font-weight: bold; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;"
           )
 
           val loc = item.relativeLocation(baseDirectory)
-          val locLabel = new Label("  " + loc)
+          locLabel.setText("  " + loc)
           locLabel.setStyle("-fx-text-fill: #585b70; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
 
-          val parts = new java.util.ArrayList[javafx.scene.Node]()
-          parts.add(icon)
-          parts.add(nameLabel)
-          parts.add(locLabel)
+          box.getChildren.clear()
+          box.getChildren.addAll(icon, nameLabel, locLabel)
 
-          // Show return value inline
           if (item.hasReturnValue) {
-            val retText = if (item.return_value.length > 50) item.return_value.take(50) + "..." else item.return_value
-            val retLabel = new Label(s"  \u2192 $retText")
+            val rv = item.return_value
+            val retText = if (rv.length > 50) rv.take(50) + "..." else rv
+            retLabel.setText(s"  \u2192 $retText")
             retLabel.setStyle("-fx-text-fill: #cba6f7; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
-            if (item.return_value.length > 50) {
-              retLabel.setTooltip(new Tooltip(item.return_value))
-            }
-            parts.add(retLabel)
+            retLabel.setTooltip(if (rv.length > 50) new Tooltip(rv) else null)
+            box.getChildren.add(retLabel)
           }
 
           if (item.hasLocals) {
-            val localsHint = new Label(s"  {} ${item.locals_data.size} vars")
+            localsHint.setText(s"  {} ${item.locals_data.size} vars")
             localsHint.setStyle("-fx-text-fill: #f9e2af; -fx-font-size: 10px;")
-            parts.add(localsHint)
+            box.getChildren.add(localsHint)
           }
 
-          val box = new HBox(2)
-          box.getChildren.addAll(parts)
-          box.setAlignment(Pos.CENTER_LEFT)
           setGraphic(box)
           setTooltip(new Tooltip(s"$name\n$loc\nDouble-click or Enter to open in editor"))
         }
@@ -441,7 +536,6 @@ class CallStackView extends VBox {
     val selected = callTree.getSelectionModel.getSelectedItem
     if (selected != null && selected.getValue != null) {
       val event = selected.getValue
-      // Don't try to open locals variable nodes
       if (event.function_name != null && !event.function_name.startsWith("\u200b")) {
         openInEditor(event.file_path, event.line_number)
       }
@@ -453,14 +547,16 @@ class CallStackView extends VBox {
     baseDirectory = if (dir != null) dir else ""
   }
 
+  /** Add a single event during live streaming (batched). */
   def addEvent(event: CallEvent): Unit = {
-    allItems.add(event)
-    if (autoScroll && !filteredItems.isEmpty) {
-      eventsTable.scrollTo(filteredItems.size - 1)
-    }
+    pendingEvents.add(event)
+    pendingScrollTo = true
+    startBatchTimer()
   }
 
   def clear(): Unit = {
+    stopBatchTimer()
+    pendingEvents.clear()
     allItems.clear()
     searchField.clear()
     outputArea.clear()
@@ -469,9 +565,29 @@ class CallStackView extends VBox {
     localsHeader.setText("Locals")
   }
 
+  /** Set all events at once (after trace completion or loading a file). */
   def setEvents(events: java.util.List[CallEvent]): Unit = {
+    stopBatchTimer()
+    pendingEvents.clear()
     allItems.setAll(events)
-    buildSummaryTree(events.asScala.toList)
+    // Build summary tree in a background thread for large traces
+    val eventsList = events.asScala.toList
+    if (eventsList.size > 5000) {
+      // Build tree on background thread, set on FX thread
+      val thread = new Thread(() => {
+        val root = buildSummaryTreeData(eventsList)
+        javafx.application.Platform.runLater(() => callTree.setRoot(root))
+      }, "callshow-tree-builder")
+      thread.setDaemon(true)
+      thread.start()
+    } else {
+      callTree.setRoot(buildSummaryTreeData(eventsList))
+    }
+  }
+
+  /** Signal that streaming is complete. Flushes remaining batched events. */
+  def streamingComplete(): Unit = {
+    stopBatchTimer()
   }
 
   def appendOutput(text: String): Unit = {
@@ -492,7 +608,7 @@ class CallStackView extends VBox {
     searchField.selectAll()
   }
 
-  def buildSummaryTree(events: List[CallEvent]): Unit = {
+  private def buildSummaryTreeData(events: List[CallEvent]): TreeItem[CallEvent] = {
     val rootEvent = new CallEvent()
     rootEvent.function_name = "Trace"
     rootEvent.file_path = ""
@@ -500,57 +616,63 @@ class CallStackView extends VBox {
     val root = new TreeItem[CallEvent](rootEvent)
     root.setExpanded(true)
 
+    // For very large traces, limit tree depth and skip locals nodes
+    val isLarge = events.size > 10000
+    val maxTreeDepth = if (isLarge) 50 else Int.MaxValue
+
     var stack = List[TreeItem[CallEvent]](root)
 
     for (event <- events) {
       if (event.event_type == "call") {
-        val item = new TreeItem[CallEvent](event)
-        item.setExpanded(event.depth < 3)
+        if (stack.size <= maxTreeDepth) {
+          val item = new TreeItem[CallEvent](event)
+          // Only expand top-level for large traces
+          item.setExpanded(event.depth < (if (isLarge) 1 else 3))
 
-        // Add locals as child nodes if present
-        if (event.hasLocals) {
-          val localsParent = createLocalsGroupNode(event)
-          item.getChildren.add(localsParent)
+          // Skip locals child nodes for large traces
+          if (!isLarge && event.hasLocals) {
+            item.getChildren.add(createLocalsGroupNode(event))
+          }
+
+          stack.head.getChildren.add(item)
+          stack = item :: stack
+        } else {
+          // Beyond max depth — still track depth for returns
+          stack = null :: stack
         }
-
-        stack.head.getChildren.add(item)
-        stack = item :: stack
       } else if (event.event_type == "return") {
         if (stack.size > 1) {
           val callItem = stack.head
-          // Copy return value onto the call event so the tree cell can display it
-          val callEvent = callItem.getValue
-          if (event.hasReturnValue) {
-            callEvent.return_value = event.return_value
-          }
+          if (callItem != null) {
+            val callEvent = callItem.getValue
+            if (event.hasReturnValue) {
+              callEvent.return_value = event.return_value
+            }
 
-          // Add return value as a child node
-          if (event.hasReturnValue) {
-            val retEvent = new CallEvent()
-            retEvent.function_name = "\u200breturn"
-            retEvent.file_path = event.return_value
-            retEvent.event_type = "local_var"
-            callItem.getChildren.add(new TreeItem[CallEvent](retEvent))
+            if (!isLarge) {
+              if (event.hasReturnValue) {
+                val retEvent = new CallEvent()
+                retEvent.function_name = "\u200breturn"
+                retEvent.file_path = event.return_value
+                retEvent.event_type = "local_var"
+                callItem.getChildren.add(new TreeItem[CallEvent](retEvent))
+              }
+              if (event.hasLocals) {
+                callItem.getChildren.add(createReturnLocalsGroupNode(event))
+              }
+            }
           }
-
-          // Add return locals to the current stack item if present
-          if (event.hasLocals) {
-            val returnLocals = createReturnLocalsGroupNode(event)
-            callItem.getChildren.add(returnLocals)
-          }
-
           stack = stack.tail
         }
       }
     }
 
-    callTree.setRoot(root)
+    root
   }
 
-  /** Create a "locals (entry)" group node containing variable children. */
   private def createLocalsGroupNode(event: CallEvent): TreeItem[CallEvent] = {
     val groupEvent = new CallEvent()
-    groupEvent.function_name = "\u200blocals (entry)"  // zero-width space as marker
+    groupEvent.function_name = "\u200blocals (entry)"
     groupEvent.file_path = s"${event.locals_data.size} variables"
     groupEvent.event_type = "locals"
     val group = new TreeItem[CallEvent](groupEvent)
@@ -558,15 +680,14 @@ class CallStackView extends VBox {
 
     event.locals_data.entrySet().asScala.foreach { entry =>
       val varEvent = new CallEvent()
-      varEvent.function_name = "\u200b" + entry.getKey  // marker + var name
-      varEvent.file_path = entry.getValue               // repurpose file_path for value display
+      varEvent.function_name = "\u200b" + entry.getKey
+      varEvent.file_path = entry.getValue
       varEvent.event_type = "local_var"
       group.getChildren.add(new TreeItem[CallEvent](varEvent))
     }
     group
   }
 
-  /** Create a "locals (return)" group node containing variable children. */
   private def createReturnLocalsGroupNode(event: CallEvent): TreeItem[CallEvent] = {
     val groupEvent = new CallEvent()
     groupEvent.function_name = "\u200blocals (return)"

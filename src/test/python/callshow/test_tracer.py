@@ -69,7 +69,7 @@ class TestTracer(unittest.TestCase):
                 directory=sample_dir,
                 command="python3 main.py",
                 output_path=output_path,
-                exclude_patterns=["site-packages", "lib/python", "importlib", "<frozen"],
+                exclude_patterns=["site-packages", "importlib", "<frozen"],
             )
             self.assertIsInstance(result, TraceResult)
             self.assertEqual(result.exit_code, 0)
@@ -108,7 +108,7 @@ class TestTracer(unittest.TestCase):
                 directory=sample_dir,
                 command="python3 main.py",
                 output_path=output_filtered,
-                exclude_patterns=["site-packages", "lib/python", "importlib", "<frozen"],
+                exclude_patterns=["site-packages", "importlib", "<frozen"],
             )
             result_all = run_traced(
                 directory=sample_dir,
@@ -139,7 +139,7 @@ class TestTracer(unittest.TestCase):
                 directory=sample_dir,
                 command="python3 main.py",
                 output_path=output_path,
-                exclude_patterns=["site-packages", "lib/python", "importlib", "<frozen"],
+                exclude_patterns=["site-packages", "importlib", "<frozen"],
                 on_event=lambda e: streamed_events.append(e),
             )
             # Streaming should have captured events

@@ -90,7 +90,6 @@ class FilterPanel extends VBox(8) {
     val patterns = new java.util.ArrayList[String]()
     if (excludeSitePackages.isSelected) {
       patterns.add("site-packages")
-      patterns.add("lib/python")
       patterns.add("importlib")
       patterns.add("<frozen")
       patterns.add("<string>")
