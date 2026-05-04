@@ -30,7 +30,7 @@ if os.environ.get("_CALLSHOW_ACTIVE") == "1":
     _trace_capture_locals = {capture_locals!r}
     _trace_start = time.monotonic()
     _trace_lock = threading.Lock()
-    _trace_max_repr = 120
+    _trace_max_repr = 10000000
 
     # Dunder methods and internal names to skip entirely -- these are
     # implementation details (bool coercion, hashing, repr, etc.) that

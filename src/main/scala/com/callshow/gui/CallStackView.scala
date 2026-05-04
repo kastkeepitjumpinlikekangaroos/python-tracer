@@ -126,12 +126,30 @@ class CallStackView extends VBox {
 
   localsTable.getColumns.addAll(varNameCol, varValueCol)
 
-  private val localsPane = new VBox(4, localsHeader, localsTable)
+  // Full-value text area: shows the complete value of the selected variable, selectable + copyable
+  private val valueDetail = new TextArea()
+  valueDetail.setEditable(false)
+  valueDetail.setWrapText(true)
+  valueDetail.setPrefRowCount(3)
+  valueDetail.setMaxHeight(80)
+  valueDetail.setFont(Font.font("Menlo", 12))
+  valueDetail.setPromptText("Click a variable above to see its full value")
+  valueDetail.getStyleClass.add("value-detail")
+
+  localsTable.getSelectionModel.selectedItemProperty().addListener((_, _, selected) => {
+    if (selected != null) {
+      valueDetail.setText(s"${selected.getKey} = ${selected.getValue}")
+    } else {
+      valueDetail.clear()
+    }
+  })
+
+  private val localsPane = new VBox(4, localsHeader, localsTable, valueDetail)
   localsPane.setPadding(new Insets(4, 0, 0, 0))
   localsPane.getStyleClass.add("locals-panel")
 
   eventsTable.getSelectionModel.selectedItemProperty().addListener((_, _, newVal) => {
-    updateLocalsPanel(newVal, localsHeader, localsTable)
+    updateLocalsPanel(newVal, localsHeader, localsTable, valueDetail)
   })
 
   // --- Table toolbar: auto-scroll + search ---
@@ -248,17 +266,36 @@ class CallStackView extends VBox {
 
   treeLocalsTable.getColumns.addAll(treeVarNameCol, treeVarValueCol)
 
-  private val treeLocalsPane = new VBox(4, treeLocalsHeader, treeLocalsTable)
+  // Full-value text area for tree locals panel
+  private val treeValueDetail = new TextArea()
+  treeValueDetail.setEditable(false)
+  treeValueDetail.setWrapText(true)
+  treeValueDetail.setPrefRowCount(3)
+  treeValueDetail.setMaxHeight(80)
+  treeValueDetail.setFont(Font.font("Menlo", 12))
+  treeValueDetail.setPromptText("Click a variable above to see its full value")
+  treeValueDetail.getStyleClass.add("value-detail")
+
+  treeLocalsTable.getSelectionModel.selectedItemProperty().addListener((_, _, selected) => {
+    if (selected != null) {
+      treeValueDetail.setText(s"${selected.getKey} = ${selected.getValue}")
+    } else {
+      treeValueDetail.clear()
+    }
+  })
+
+  private val treeLocalsPane = new VBox(4, treeLocalsHeader, treeLocalsTable, treeValueDetail)
   treeLocalsPane.setPadding(new Insets(4, 0, 0, 0))
   treeLocalsPane.getStyleClass.add("locals-panel")
 
   // Wire tree selection to locals panel
   callTree.getSelectionModel.selectedItemProperty().addListener((_, _, newVal) => {
     if (newVal != null && newVal.getValue != null) {
-      updateLocalsPanel(newVal.getValue, treeLocalsHeader, treeLocalsTable)
+      updateLocalsPanel(newVal.getValue, treeLocalsHeader, treeLocalsTable, treeValueDetail)
     } else {
       treeLocalsHeader.setText("Locals")
       treeLocalsTable.getItems.clear()
+      treeValueDetail.clear()
     }
   })
 
@@ -323,20 +360,24 @@ class CallStackView extends VBox {
   private def updateLocalsPanel(
     event: CallEvent,
     header: Label,
-    table: TableView[java.util.Map.Entry[String, String]]
+    table: TableView[java.util.Map.Entry[String, String]],
+    detail: TextArea
   ): Unit = {
     val items = FXCollections.observableArrayList[java.util.Map.Entry[String, String]]()
 
     if (event != null && event.hasReturnValue) {
       items.add(java.util.Map.entry("\u21b5 return", event.return_value))
+      // Auto-show return value in detail area
+      detail.setText(s"\u21b5 return = ${event.return_value}")
+    } else {
+      detail.clear()
     }
 
     if (event != null && event.hasLocals) {
       items.addAll(event.locals_data.entrySet())
-      val retSuffix = if (event.hasReturnValue) s" \u2192 ${truncate(event.return_value, 40)}" else ""
-      header.setText(s"Locals \u2014 ${event.function_name}()$retSuffix")
+      header.setText(s"Locals \u2014 ${event.function_name}()")
     } else if (event != null && event.hasReturnValue) {
-      header.setText(s"Locals \u2014 ${event.function_name}() \u2192 ${truncate(event.return_value, 60)}")
+      header.setText(s"Locals \u2014 ${event.function_name}()")
     } else if (event != null) {
       header.setText("Locals \u2014 not captured (enable 'Capture locals()' and re-run)")
     } else {
@@ -422,12 +463,15 @@ class CallStackView extends VBox {
     }
   }
 
-  /** Tree cell for summary view. Reuses child nodes. */
+  /** Tree cell for summary view.
+   *  Layout: icon  functionName  → returnValue  location  {} N vars
+   *  Return value is prominent (bright, before the dimmed location).
+   */
   private class SummaryTreeCell extends TreeCell[CallEvent] {
     private val icon = new Label()
     private val nameLabel = new Label()
-    private val locLabel = new Label()
     private val retLabel = new Label()
+    private val locLabel = new Label()
     private val localsHint = new Label()
     private val box = new HBox(2)
     box.setAlignment(Pos.CENTER_LEFT)
@@ -473,21 +517,24 @@ class CallStackView extends VBox {
             else "-fx-text-fill: #cdd6f4; -fx-font-weight: bold; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px;"
           )
 
-          val loc = item.relativeLocation(baseDirectory)
-          locLabel.setText("  " + loc)
-          locLabel.setStyle("-fx-text-fill: #585b70; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
-
           box.getChildren.clear()
-          box.getChildren.addAll(icon, nameLabel, locLabel)
+          box.getChildren.addAll(icon, nameLabel)
 
+          // Return value: short preview, full value in locals panel below
           if (item.hasReturnValue) {
             val rv = item.return_value
-            val retText = if (rv.length > 50) rv.take(50) + "..." else rv
-            retLabel.setText(s"  \u2192 $retText")
-            retLabel.setStyle("-fx-text-fill: #cba6f7; -fx-font-family: 'Menlo', monospace; -fx-font-size: 11px;")
-            retLabel.setTooltip(if (rv.length > 50) new Tooltip(rv) else null)
+            val display = if (rv.length > 40) rv.take(40) + "\u2026" else rv
+            retLabel.setText(s" \u2192 $display")
+            retLabel.setStyle("-fx-text-fill: #b4befe; -fx-font-family: 'Menlo', monospace; -fx-font-size: 12px; -fx-font-weight: bold;")
+            retLabel.setTooltip(new Tooltip(rv))
             box.getChildren.add(retLabel)
           }
+
+          // Location (dimmed, at the end)
+          val loc = item.relativeLocation(baseDirectory)
+          locLabel.setText("  " + loc)
+          locLabel.setStyle("-fx-text-fill: #45475a; -fx-font-family: 'Menlo', monospace; -fx-font-size: 10px;")
+          box.getChildren.add(locLabel)
 
           if (item.hasLocals) {
             localsHint.setText(s"  {} ${item.locals_data.size} vars")
@@ -496,7 +543,9 @@ class CallStackView extends VBox {
           }
 
           setGraphic(box)
-          setTooltip(new Tooltip(s"$name\n$loc\nDouble-click or Enter to open in editor"))
+          setTooltip(new Tooltip(s"$name\n${item.relativeLocation(baseDirectory)}" +
+            (if (item.hasReturnValue) s"\n\u2192 ${item.return_value}" else "") +
+            "\nDouble-click or Enter to open in editor"))
         }
         setText(null)
       }

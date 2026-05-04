@@ -310,6 +310,19 @@
     -fx-padding: 0 1 0 1;
 }
 
+/* ===== Value Detail TextArea ===== */
+.value-detail {
+    -fx-background-color: #11111b;
+    -fx-text-fill: #a6e3a1;
+    -fx-font-family: "Menlo", "Fira Code", "Consolas", monospace;
+    -fx-font-size: 12px;
+    -fx-border-color: #313244;
+    -fx-border-width: 1 0 0 0;
+}
+.value-detail .content {
+    -fx-background-color: #11111b;
+}
+
 /* ===== Separator ===== */
 .separator .line {
     -fx-border-color: #313244;

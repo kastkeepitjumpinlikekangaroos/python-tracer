@@ -29,7 +29,7 @@ _cs_output_path = __TRACE_OUTPUT_PATH__
 _cs_log_path = _cs_output_path + ".log"
 _cs_exclude = __TRACE_EXCLUDE_PATTERNS__
 _cs_capture_locals = __TRACE_CAPTURE_LOCALS__
-_cs_max_repr = 120
+_cs_max_repr = 10000000
 
 # Error log for diagnostics
 def _cs_log(msg):
